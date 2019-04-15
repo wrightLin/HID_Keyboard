@@ -1,0 +1,14 @@
+
+/*
+ * Auto generated Run-Time-Environment Component Configuration File
+ *      *** Do not modify ! ***
+ *
+ * Project: 'dual_mode_kb_pca10040_s112' 
+ * Target:  'nrf52832_xxaa' 
+ */
+
+#ifndef RTE_COMPONENTS_H
+#define RTE_COMPONENTS_H
+
+
+#endif /* RTE_COMPONENTS_H */

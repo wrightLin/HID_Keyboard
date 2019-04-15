@@ -1,0 +1,12 @@
+# Ignore everything
+*
+# Whitelist subdirectories
+!*/
+
+# Whitelist the following extensions
+!*.c
+!*.php
+!*.js
+!*.php
+!*.h
+!.gitignore
