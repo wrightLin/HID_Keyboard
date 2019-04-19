@@ -153,13 +153,14 @@
 static void fds_evt_handler(fds_evt_t const * p_evt);
 static ret_code_t mode_record_delete(void);
 static ret_code_t mode_record_write(uint32_t mode_value);
+static ret_code_t mode_record_update(uint32_t mode_value);
 static ret_code_t mode_record_read(void);
 
 
 /* Flag to check fds initialization. */
 static bool volatile m_fds_initialized;
 bool fds_busy_flag = false;
-uint32_t current_transmit_mode_data[1] = {DEFAULT_TRANSMIT_MODE};
+static uint32_t current_transmit_mode_data[1] = {DEFAULT_TRANSMIT_MODE};
 
 static struct
 {
@@ -173,12 +174,10 @@ static struct
 
 /********************************* wright apptimer start ******************************/
 
-APP_TIMER_DEF(m_write_fds_data_timer_id);  
-bool fds_timer_is_start = false;
-#define SIMPLE_DELAY_INTERVAL      			 APP_TIMER_TICKS(1000) /**< simple delay interval (ticks). */
-static void current_mode_writer_timeout_handler(void * p_context);
+volatile bool fds_is_start = false;
 
-
+#define DEFAULT_TRANSMIT_MODE 0x0000 //Gazell
+uint8_t is_softdevice_enabled = false;
 /****************************** wright apptimer end ******************************/
 
 
@@ -370,18 +369,16 @@ static void timers_init(void)
     }		
 
 
-		//wright : add for mode writer
-	  err_code = app_timer_create(&m_write_fds_data_timer_id,
-                                APP_TIMER_MODE_SINGLE_SHOT,
-                                current_mode_writer_timeout_handler);
-		
+
     APP_ERROR_CHECK(err_code);
 }
 
 static void clock_start( void )
 {   
     uint32_t err_code = nrf_drv_clock_init();
-    APP_ERROR_CHECK(err_code);
+    
+		APP_ERROR_CHECK(err_code);
+	
     nrf_drv_clock_lfclk_request(NULL);
 	
 }
@@ -678,6 +675,12 @@ static uint32_t buffer_dequeue(bool tx_flag)
  */
 static void keys_send(uint8_t key_pattern_len, uint8_t * p_key_pattern)
 {
+	//wright : 0415 
+		NRF_LOG_INFO("----- ENTER keys_send -----");
+		NRF_LOG_INFO("Num_Key: %d",key_pattern_len);
+		NRF_LOG_HEXDUMP_INFO(p_key_pattern, 6);
+	
+	
     ret_code_t err_code;
     uint16_t actual_len;
 
@@ -713,6 +716,12 @@ static void keys_send(uint8_t key_pattern_len, uint8_t * p_key_pattern)
 //wright : fix for not detecting modifier keys.
 static void keys_send_fix(uint8_t key_pattern_len, uint8_t * p_key_pattern,uint8_t p_modifier)
 {
+		//wright : 0415
+		NRF_LOG_INFO("----- ENTER keys_send_fix -----");
+		NRF_LOG_INFO("Num_Key: %d",key_pattern_len);
+		NRF_LOG_HEXDUMP_INFO(p_key_pattern, 6);
+	
+	
     ret_code_t err_code;
     uint16_t actual_len;
 
@@ -721,19 +730,7 @@ static void keys_send_fix(uint8_t key_pattern_len, uint8_t * p_key_pattern,uint8
                                            0,
                                            &actual_len,
 																						p_modifier);
-    // An additional notification is needed for release of all keys, therefore check
-    // is for actual_len <= key_pattern_len and not actual_len < key_pattern_len.
-/*	
-    if ((err_code == NRF_ERROR_RESOURCES) && (actual_len <= key_pattern_len))		
-    {
-        // Buffer enqueue routine return value is not intentionally checked.
-        // Rationale: Its better to have a a few keys missing than have a system
-        // reset. Recommendation is to work out most optimal value for
-        // MAX_BUFFER_ENTRIES to minimize chances of buffer queue full condition
-        UNUSED_VARIABLE(buffer_enqueue(p_key_pattern, key_pattern_len, actual_len));
-    }
 
-*/
     if ((err_code != NRF_SUCCESS) &&
         (err_code != NRF_ERROR_INVALID_STATE) &&
         (err_code != NRF_ERROR_RESOURCES) &&
@@ -763,7 +760,7 @@ static void on_hid_rep_char_write(uint8_t report_val, uint8_t length)
 								//err_code = bsp_indication_set(BSP_INDICATE_ALERT_3);
 							
                 APP_ERROR_CHECK(err_code);
-
+								
                 keys_send(sizeof(m_caps_on_key_scan_str), m_caps_on_key_scan_str);
                 m_caps_on = true;
             }
@@ -815,72 +812,6 @@ static void sleep_mode_enter(void)
 		 m_coms_ble_sleep_mode_enter();		 
 }
 
-
-//wright : fix for not to infect GPIO output
-
-/**@brief Function for handling events from the BSP module.
- *
- * @param[in]   event   Event generated when button is pressed.
- */
-//static void bsp_event_handler(bsp_event_t event)
-//{
-// //ret_code_t err_code;
-//	static uint8_t * p_key = m_sample_key_press_scan_str;
-//  static uint8_t   size  = 0;
-//  
-//  switch (event)
-//    {
-//       case BSP_EVENT_SLEEP:
-//            //sleep_mode_enter();
-//            break;
-//			 
-//			 case BSP_EVENT_DISCONNECT:
-//            m_coms_ble_diconnect();
-//			    
-//            break;
-//			 
-//			 case BSP_EVENT_WHITELIST_OFF:
-//			      m_coms_ble_whitelist_off();
-//			 
-//			      break;
-//			 
-//			 case BSP_EVENT_KEY_0:
-//            //if (is_bonded)
-//            //{
-//                keys_send(2, p_key);
-//                p_key++;
-//                size++;
-//                if (size == MAX_KEYS_IN_ONE_REPORT)
-//                {
-//                    p_key = m_sample_key_press_scan_str;
-//                    size  = 0;
-//                }
-//            //}
-//            break;
-//        default:
-//            break;
-//    }
-//}
-
-
-//wright : fix for not to infect GPIO output
-///**@brief Function for initializing buttons and leds.
-// *
-// * @param[out] p_erase_bonds  Will be true if the clear bonding button was pressed to wake the application up.
-// */
-//static void buttons_leds_init(bool * p_erase_bonds)
-//{
-//    ret_code_t err_code;
-//    bsp_event_t startup_event;
-
-//    err_code = bsp_init(BSP_INIT_LEDS | BSP_INIT_BUTTONS, bsp_event_handler);
-//    APP_ERROR_CHECK(err_code);
-
-//    err_code = bsp_btn_ble_init(NULL, &startup_event);
-//    APP_ERROR_CHECK(err_code);
-
-//    *p_erase_bonds = (startup_event == BSP_EVENT_CLEAR_BONDING_DATA);
-//}
 
 
 /**@brief Function for initializing the nrf log module.
@@ -1211,31 +1142,10 @@ static void m_keyboard_handler(void * p_event_data, uint16_t event_size)
     
     keyboard_pkt = (m_keyboard_data_t *) p_event_data;
 	
-	//wright : Try to send key value by 52 series way
-	// 1.Try to get data from m_keyborad_handler (Before HW ready, Use Fake Data)
-	// 2.figure out the format of data
-	// 3.try to reproduce the sending proccess of 52 series
-		NRF_LOG_INFO("---Enter m_keyboard_handler!---");
-	
-	//wright : send a fake key package 
-//		m_keyboard_data_t new_key_data;
-//		m_keyboard_data_t * fake_key_data = &new_key_data; 
 
-		//fake data : wright 
-//		uint8_t fake_str[M_KEYBOARD_MAX_NUM_KEYS] = /**< Key pattern to be sent when the key press button has been pushed. */
-//		{
-//				0xE1,       //shift key code
-//				0x00,       
-//				0x00,       
-//				0x00,       
-//				0x00,       
-//				0x00        
-//		};
-//		fake_key_data->modifier_keys = 0x02;
-//		memcpy(fake_key_data->keys,fake_str,M_KEYBOARD_MAX_NUM_KEYS);
-//		fake_key_data->num_keys=0x01;
-//		fake_key_data->pairing_button=0x00;
-//	
+		NRF_LOG_INFO("---Enter m_keyboard_handler!---");
+
+	
 		if (keyboard_pkt->pairing_button)
     {
 			//do nothing
@@ -1247,114 +1157,47 @@ static void m_keyboard_handler(void * p_event_data, uint16_t event_size)
 				//1.delete mode data 
 				//2.write mode data to flash 
 				//3.reset 
-//				if(keyboard_pkt->keys[0] == KEY_CODE_BLE_MODE)
-//				{
-//					NRF_LOG_INFO("---PRESS KEY_CODE_BLE_MODE !---");
-//					IS_KEY_CODE_MODE_PRESSED = true;
-//					current_transmit_mode_data[0] = M_COMS_BLE_MODE;
-//				}
-//					
-//				
-//				if(keyboard_pkt->keys[0] == KEY_CODE_GARZLL_MODE)	
-//				{
-//					NRF_LOG_INFO("---PRESS KEY_CODE_GARZLL_MODE !---");
-//					IS_KEY_CODE_MODE_PRESSED = true;
-//					current_transmit_mode_data[0] = M_COMS_GZLL_MODE;
-//				}
-//						
-//			
-//				if(
-//						!fds_timer_is_start&&
-//						m_keyboard_packet_is_empty(keyboard_pkt)&&
-//						IS_KEY_CODE_MODE_PRESSED
-//					)
-//					{
-//						NRF_LOG_INFO("---KEY_CODE_MODE_PRESSED & Released!---");
-//						fds_timer_is_start = true;
-//						err_code = app_timer_start(m_write_fds_data_timer_id, SIMPLE_DELAY_INTERVAL, NULL);
-//					}
-				//wright : fake key package	
-//				NRF_LOG_INFO("---Keys_send---");
-//				NRF_LOG_INFO("Num_Key: %d",fake_key_data->num_keys);
-//				NRF_LOG_HEXDUMP_INFO(fake_key_data->keys, 6);
-//				keys_send(fake_key_data->num_keys,fake_key_data->keys);
+				if(keyboard_pkt->keys[0] == KEY_CODE_BLE_MODE)
+				{
+					NRF_LOG_INFO("---PRESS KEY_CODE_BLE_MODE !---");
+					IS_KEY_CODE_MODE_PRESSED = true;
+					current_transmit_mode_data[0] = M_COMS_BLE_MODE;
+				}
+					
+				
+				if(keyboard_pkt->keys[0] == KEY_CODE_GARZLL_MODE)	
+				{
+					NRF_LOG_INFO("---PRESS KEY_CODE_GARZLL_MODE !---");
+					IS_KEY_CODE_MODE_PRESSED = true;
+					current_transmit_mode_data[0] = M_COMS_GZLL_MODE;
+				}
+						
 			
-				//wright : actual key package
-//				
-//				NRF_LOG_INFO("Num_Key: %d",keyboard_pkt->num_keys);
-//				NRF_LOG_HEXDUMP_INFO(keyboard_pkt->keys, 6);
-//			
+				//wright : 
+				// start to update mode data under these conditions 
+				// 1.mode change key has pressed 
+				// 2.Keyboard was released
+				if(
+						!fds_is_start&&
+						m_keyboard_packet_is_empty(keyboard_pkt)&&
+						IS_KEY_CODE_MODE_PRESSED
+					)
+					{
+						
 
-//				NRF_LOG_INFO("---Keys_send---");
+						fds_is_start = true;
+						m_keyboard_polling_disable();
+						NRF_LOG_INFO("---KEY_CODE_MODE_PRESSED & Released!---");
+						mode_record_update(current_transmit_mode_data[0]);
+						while(fds_busy_flag==true){idle_state_handle();}
+
+					}
+
+
 				keys_send_fix(keyboard_pkt->num_keys,keyboard_pkt->keys,keyboard_pkt->modifier_keys);
 				
 		}
 
-    
-//    if (keyboard_pkt->pairing_button)
-//    {
-//        uint8_t release_report[8] = {0};
-//        
-//        app_timer_stop(s_gzll_keep_alive_id);
-//        
-//        // Stop buffer timer and flush
-//        if (s_buffer_timer_running)
-//        {
-//            err_code = app_timer_stop(s_packet_buffer_id);
-//            APP_ERROR_CHECK(err_code);
-//            s_buffer_timer_running = false;
-//        }
-//        
-//        s_packet_buffer.start_idx = 0;
-//        s_packet_buffer.end_idx = 0;
-//        
-//        if(s_connection_state == state_connected)
-//        {
-//            // Send release packet
-//            m_coms_hid_report_send(release_report, 
-//                                   sizeof(release_report), 
-//                                   0,
-//                                   s_hid_reports.keyboard_rep_idx);     
-//       }                               
-//        // Start bonding
-//        m_coms_bonding_start();
-//    }
-//    else
-//    {
-//        if (s_waiting_for_passkey)
-//        {
-//            if (keyboard_pkt->num_keys > 0)
-//            {
-//                memcpy(&s_passkey_buf[s_passkey_idx], keyboard_pkt->keys, keyboard_pkt->num_keys);
-//                s_passkey_idx += keyboard_pkt->num_keys;
-//                
-//                if (s_passkey_idx >= 6)
-//                {
-//                    err_code = m_coms_ble_passkey_set(s_passkey_buf);
-//                    APP_ERROR_CHECK(err_code);
-//                    s_passkey_idx = 0;
-//                }
-//            }
-//        }
-//        else
-//        {
-//            buffer_keys(keyboard_pkt);    
-//            memcpy(&s_gzll_keepalive_keyboard_pkt, keyboard_pkt, sizeof(m_keyboard_data_t));
-//        
-//            if (s_protocol_mode == protocol_mode_gzll)
-//            {
-//                if (m_keyboard_packet_is_empty(keyboard_pkt))
-//                {
-//                    app_timer_stop(s_gzll_keep_alive_id);
-//                }
-//                else
-//                {
-//                    app_timer_start(s_gzll_keep_alive_id, APP_TIMER_TICKS(500, APP_TIMER_PRESCALER), 0);
-//                }
-//            }
-//        }
-//    }
-    // Notifying the power manager of activity
     m_pwr_mgmt_feed();
 }
 
@@ -1366,21 +1209,6 @@ void keyboard_module_enable(void)
 {
     uint32_t err_code;
 
-	//wright : waiting for Jennifer's reply
-	
-//    err_code = m_coms_ble_report_descriptor_add(s_keyboard_hid_descriptor, sizeof(s_keyboard_hid_descriptor), ble_boot_pkt_keyboard, &s_hid_interface_idx);
-//    APP_ERROR_CHECK(err_code);
-//    
-//    err_code = m_coms_ble_report_id_map(s_hid_interface_idx, hid_report_type_input, false, 0, 8, &s_hid_reports.keyboard_rep_idx);
-//    APP_ERROR_CHECK(err_code);
-//    
-//    err_code = m_coms_ble_report_id_map(s_hid_interface_idx, hid_report_type_output, false, 0, 1, &s_hid_reports.output_rep_idx);
-//    APP_ERROR_CHECK(err_code);
-//    
-//    err_code = m_coms_ble_report_id_map(s_hid_interface_idx, hid_report_type_feature, false, 0, 2, &s_hid_reports.feature_rep_idx);
-//    APP_ERROR_CHECK(err_code);
-        // Keyboard module. 
-	
 	
     err_code = m_keyboard_init(keyboard_format_usbhid, m_keyboard_handler);    
     APP_ERROR_CHECK(err_code); 
@@ -1452,6 +1280,21 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
 								fds_busy_flag = false;
             }
         } break;
+				
+				case FDS_EVT_UPDATE:
+				{
+            if (p_evt->result == FDS_SUCCESS)
+            {
+								NRF_LOG_INFO("FDS_EVT_UPDATE Success:");
+                NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->del.record_id);
+                NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->del.file_id);
+                NRF_LOG_INFO("Record key:\t0x%04x", p_evt->del.record_key);
+								fds_busy_flag = false;
+								//wright: 0418
+								NRF_LOG_INFO("====Read file data after \"FDS_EVT_UPDATE Success:\"====");
+								//mode_record_read();
+            }
+        } break;
 
         default:
             break;
@@ -1499,7 +1342,7 @@ static ret_code_t mode_record_write(uint32_t mode_value)
         .file_id           = LAST_TRANSMIT_MODE_FILE_ID,
         .key               = LAST_TRANSMIT_MODE_RECORD_KEY,
         .data.p_data       = &mode_value,
-        .data.length_words = (2 + 3) / sizeof(uint32_t)
+        .data.length_words = 1
     };
 
 
@@ -1511,12 +1354,54 @@ static ret_code_t mode_record_write(uint32_t mode_value)
 		return rc;
 }
 
+static ret_code_t mode_record_update(uint32_t mode_value)
+{
+		//record find
+		fds_record_desc_t desc = {0};
+		fds_find_token_t  tok  = {0};
+		ret_code_t rc;
+		fds_flash_record_t frec = {0};
+			
+		rc=fds_record_find(LAST_TRANSMIT_MODE_FILE_ID,LAST_TRANSMIT_MODE_RECORD_KEY,&desc,&tok);
+	
+		if (rc != FDS_SUCCESS)
+    {
+			NRF_LOG_INFO("fds_record_find failed... error code %d",rc);
+			return rc;
+    }
+		
+		
+		//record update
+		fds_busy_flag = true;
+    fds_record_t const rec =
+    {
+        .file_id           = LAST_TRANSMIT_MODE_FILE_ID,
+        .key               = LAST_TRANSMIT_MODE_RECORD_KEY,
+        .data.p_data       = &mode_value,
+        .data.length_words = 1//(2 + 3) / sizeof(uint32_t)
+    };
+		
+		
+		NRF_LOG_INFO("==== mode data before update ==== : %d",mode_value);
+	
+		rc = fds_record_update(&desc, &rec);
+		
+    if (rc != FDS_SUCCESS)
+    {
+			NRF_LOG_INFO("fds_record_update failed... error code %d",rc);
+			return rc;
+    }
+		
+		
+		return rc;
+}
+
+
 
 
 static ret_code_t mode_record_read(void)
 {
-		//there is no need to pend while reading fds data
-		//fds_busy_flag = true;
+
     fds_record_desc_t desc = {0};
     fds_find_token_t  tok  = {0};
 		ret_code_t rc;
@@ -1524,12 +1409,17 @@ static ret_code_t mode_record_read(void)
 		//uint32_t data_read[1] ={0};
 			
 		rc=fds_record_find(LAST_TRANSMIT_MODE_FILE_ID,LAST_TRANSMIT_MODE_RECORD_KEY,&desc,&tok);
+		
+
+		
 		if (rc == FDS_SUCCESS)
 		{
 				rc = fds_record_open(&desc, &frec);
 				if(rc == FDS_SUCCESS)
 				{
 					current_transmit_mode_data[0] = *(uint32_t *)frec.p_data; 
+					NRF_LOG_INFO("Hex dump the contents of p_data\n");
+					NRF_LOG_HEXDUMP_INFO(frec.p_data, 4);
 					NRF_LOG_INFO("current_transmit_mode_data = %x",current_transmit_mode_data[0]);
 					rc = fds_record_close(&desc);			
 				}
@@ -1539,10 +1429,11 @@ static ret_code_t mode_record_read(void)
 				}
 			
 		}
-		else
+		//wright : if file not find, create one (Default mode).
+		else if (rc == FDS_ERR_NOT_FOUND)
 		{
-			NRF_LOG_INFO("can't find last transmit mode ! --- Use Default Mode");
-			//fds_busy_flag = false;
+			NRF_LOG_INFO("record not found! , write Default mode into flash...");
+			mode_record_write(M_COMS_GZLL_MODE);
 		}
 
 		
@@ -1565,13 +1456,13 @@ static void wait_for_fds_ready(void)
 
 //wright: mode selection 
 
-#define DEFAULT_TRANSMIT_MODE 0x0000 //Gazell
 bool mode_selection()
 {
+		
 
+
+	
 		bool mode_result;
-		//wright :FDS Logic TODO 
-		//Init Fds module & Register handler
 		ret_code_t ret;
 
 		/* Register first to receive an event when initialization is complete. */
@@ -1589,44 +1480,15 @@ bool mode_selection()
 		//decide transmit mode
 		mode_result =(current_transmit_mode_data[0] == DEFAULT_TRANSMIT_MODE) ;
 		
+		
+		
+		
 		return mode_result;
 }
 /********************************* wright : FDS part end ******************************/
 
 
 
-
-
-
-/********************************* wright apptimer start ******************************/
-
-static void current_mode_writer_timeout_handler(void * p_context)
-{
-			//wright : in order to avoid peer manager's affect (it also use FDS module), re-init fds with new fds event handler
-			/* Register first to receive an event when initialization is complete. */
-//			ret_code_t ret;
-//			(void) fds_register(fds_evt_handler);
-
-//			ret = fds_init();
-//			wait_for_fds_ready();
-	
-
-			NRF_LOG_INFO("enter mode writer handler , current_transmit_mode_data[0] : %x ",
-										current_transmit_mode_data[0]);
-
-			m_keyboard_polling_disable();
-			mode_record_delete();
-			while(fds_busy_flag==true){idle_state_handle();}
-			mode_record_write(current_transmit_mode_data[0]);
-			while(fds_busy_flag==true){idle_state_handle();}
-		
-			NVIC_SystemReset();
-}
-
-
-
-
-/****************************** wright apptimer end ******************************/
 
 
 
@@ -1644,11 +1506,11 @@ int main(void)
 	
 	
 		//wright : Mode selection
-	
+		mode_selection();
 //		m_protocol_mode = 
 //		((mode_selection())?M_COMS_GZLL_MODE:M_COMS_BLE_MODE) ;
 
-    m_protocol_mode = M_COMS_BLE_MODE;//((nrf_gpio_pin_read(PROTOCOL_DETECT_PIN) == 0)?M_COMS_BLE_MODE:M_COMS_GZLL_MODE) ;
+    m_protocol_mode = M_COMS_GZLL_MODE;//((nrf_gpio_pin_read(PROTOCOL_DETECT_PIN) == 0)?M_COMS_BLE_MODE:M_COMS_GZLL_MODE) ;
 
     timers_init();	
 
