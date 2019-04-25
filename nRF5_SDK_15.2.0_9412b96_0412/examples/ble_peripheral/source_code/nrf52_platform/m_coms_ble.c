@@ -143,7 +143,23 @@ static void whitelist_set(pm_peer_id_list_skip_t skip)
     NRF_LOG_INFO("\tm_whitelist_peer_cnt %d, MAX_PEERS_WLIST %d",
                    peer_id_count + 1,
                    BLE_GAP_WHITELIST_ADDR_MAX_COUNT);
+	
+	
+	
+	
+	
+		//wright : 0420 check peer_ids 
+			NRF_LOG_INFO("peer_ids : ");
+			NRF_LOG_HEXDUMP_INFO(peer_ids,BLE_GAP_WHITELIST_ADDR_MAX_COUNT*2);
 
+	
+
+		
+		
+		
+		
+		
+		
     err_code = pm_whitelist_set(peer_ids, peer_id_count);
     APP_ERROR_CHECK(err_code);
 }
@@ -191,10 +207,44 @@ static void advertising_start(void)
 				
 				ble_adv_mode_t adv_mode = (is_bonded_before)?BLE_ADV_MODE_DIRECTED_HIGH_DUTY:BLE_ADV_MODE_FAST;
 			
+	
+//				//wright 0423:  find all peer_ids and the mac address before adv start
+//				if(is_bonded_before)
+//				{
+//					pm_peer_id_t peer_ids[BLE_GAP_WHITELIST_ADDR_MAX_COUNT];
+//					uint32_t     peer_id_count = pm_peer_count();
+
+//					ret_code_t err_code = pm_peer_id_list(peer_ids, &peer_id_count, PM_PEER_ID_INVALID, PM_PEER_ID_LIST_SKIP_NO_ID_ADDR);
+//					APP_ERROR_CHECK(err_code);
+
+//		
+//					pm_peer_data_bonding_t peer_bonding_data;
+
+//					// Only Give peer address if we have a handle to the bonded peer.
+//					for(int i = 0 ;i<peer_id_count;i++ )
+//					{
+//						if (peer_ids[i] != PM_PEER_ID_INVALID )
+//						{
+//								err_code = pm_peer_data_bonding_load(peer_ids[i], &peer_bonding_data);
+//								if (err_code != NRF_ERROR_NOT_FOUND)
+//								{
+//										//APP_ERROR_CHECK(err_code);
+//										// Manipulate identities to exclude peers with no Central Address Resolution.
+//										//identities_set(PM_PEER_ID_LIST_SKIP_ALL);
+//										NRF_LOG_INFO("peer_ids[%d] : %x ;  p_peer_addr : ",i,peer_ids[i]);
+//										NRF_LOG_HEXDUMP_INFO(peer_bonding_data.peer_ble_id.id_addr_info.addr,BLE_GAP_ADDR_LEN);
+//								}
+//						}				
+//					}
+//				}
+//				
+
+	
 				//wright : fix for not enter sleep mode too fast 
 	      //if(is_bonded_before)  m_advertising.adv_modes_config.ble_adv_fast_timeout =300;
-				     
-        whitelist_set(PM_PEER_ID_LIST_SKIP_NO_ID_ADDR);
+				    
+				//wright 0423 boradcast without whitelist
+        //whitelist_set(PM_PEER_ID_LIST_SKIP_NO_ID_ADDR);
        
         ret_code_t ret = ble_advertising_start(&m_advertising, adv_mode);
         APP_ERROR_CHECK(ret);	
@@ -614,6 +664,41 @@ static void on_hids_evt(ble_hids_t * p_hids, ble_hids_evt_t * p_evt)
     }
 }
 
+//wright 0424: get the corresponding bonding peer_id of current mode 
+void get_peer_id_from_register()
+{
+		uint32_t mode_result = 0;
+		ret_code_t ret;
+		//cause regiter init val is 0, to avoid confuse we add a start val to peer_id;
+		uint8_t peer_start_val = 1;
+	
+		//read last transmitted mode from gpregret register 
+		mode_result = NRF_POWER->GPREGRET;
+		switch(mode_result)
+		{
+			case 0:
+				NRF_LOG_INFO("--- Default Mode : Gazll ---");
+				break;
+			case 1:
+				NRF_LOG_INFO("--- BLE Mode : Pairing Device 1 ---");
+				m_peer_id = ((NRF_POWER->GPREGRET2 & 0xf0)>>4)-peer_start_val;			
+				NRF_LOG_INFO("m_peer_id : %d",m_peer_id);
+			
+				break;
+			case 2:
+				NRF_LOG_INFO("--- BLE Mode : Pairing Device 2 ---");
+				m_peer_id = (NRF_POWER->GPREGRET2 & 0x0f)-peer_start_val;
+				NRF_LOG_INFO("m_peer_id : %d",m_peer_id);
+			
+				break;
+			default :
+				NRF_LOG_INFO("--- Default Mode : Gazll ---");
+				break;		
+		}
+
+}
+
+
 
 /**@brief Function for handling advertising events.
  *
@@ -692,6 +777,9 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
         {
             pm_peer_data_bonding_t peer_bonding_data;
 
+						//wright 0424: get the corresponding bonding data of current mode 
+						get_peer_id_from_register();
+					
             // Only Give peer address if we have a handle to the bonded peer.
             if (m_peer_id != PM_PEER_ID_INVALID)
             {
@@ -702,9 +790,14 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
 
                     // Manipulate identities to exclude peers with no Central Address Resolution.
                     identities_set(PM_PEER_ID_LIST_SKIP_ALL);
-
                     ble_gap_addr_t * p_peer_addr = &(peer_bonding_data.peer_ble_id.id_addr_info);
-                    err_code = ble_advertising_peer_addr_reply(&m_advertising, p_peer_addr);
+									
+										//wright 0424: 
+										NRF_LOG_INFO("p_peer_addr : ");
+										NRF_LOG_HEXDUMP_INFO(p_peer_addr->addr , BLE_GAP_ADDR_LEN);
+									
+										
+										err_code = ble_advertising_peer_addr_reply(&m_advertising, p_peer_addr);
                     APP_ERROR_CHECK(err_code);
                 }
             }
@@ -745,6 +838,12 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 				    // Notify m_coms of event
             coms_evt.type = M_COMS_BLE_EVT_DISCONNECTED;
             m_event_callback(&coms_evt, sizeof(coms_evt));
+				
+				
+						//wright : 0420 
+						m_coms_ble_whitelist_off();
+						is_adv_started = true;
+				
             break; // BLE_GAP_EVT_DISCONNECTED
 
         case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
@@ -933,6 +1032,7 @@ void m_coms_ble_enable(bool erase_bonds)
    }
 	 else
 	 {	 
+				NRF_LOG_INFO("=========== m_coms_ble_enable advertising_start:============");
         advertising_start();
    }
 
@@ -955,6 +1055,8 @@ void m_coms_ble_hid_report_send(uint8_t report_id, uint8_t  * p_data )
 		{
        if (!is_adv_started)
 			 {	 
+				 //wright 0425
+				 NRF_LOG_INFO("===========is_adv_started false===========");
 			    advertising_start();    //Can only call once	
 			 }				 
 		}			

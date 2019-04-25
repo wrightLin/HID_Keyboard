@@ -578,7 +578,7 @@ bool m_keyboard_new_packet(m_keyboard_data_t ** p_key_packet)
             new_packet_prepared = false;
 					
 						//wright : set for long push
-						pressed_count++;
+						//pressed_count++;
         }
     }
     else

@@ -1,42 +1,4 @@
-/**
- * Copyright (c) 2015 - 2018, Nordic Semiconductor ASA
- *
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form, except as embedded into a Nordic
- *    Semiconductor ASA integrated circuit in a product or a software update for
- *    such product, must reproduce the above copyright notice, this list of
- *    conditions and the following disclaimer in the documentation and/or other
- *    materials provided with the distribution.
- *
- * 3. Neither the name of Nordic Semiconductor ASA nor the names of its
- *    contributors may be used to endorse or promote products derived from this
- *    software without specific prior written permission.
- *
- * 4. This software, with or without modification, must only be used with a
- *    Nordic Semiconductor ASA integrated circuit.
- *
- * 5. Any software provided in binary form under this license must not be reverse
- *    engineered, decompiled, modified and/or disassembled.
- *
- * THIS SOFTWARE IS PROVIDED BY NORDIC SEMICONDUCTOR ASA "AS IS" AND ANY EXPRESS
- * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY, NONINFRINGEMENT, AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL NORDIC SEMICONDUCTOR ASA OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
- * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
- * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- */
+/*$$$LICENCE_NORDIC_STANDARD<2015>$$$*/
 #include "sdk_common.h"
 #if NRF_MODULE_ENABLED(PEER_MANAGER)
 #include "gatt_cache_manager.h"
@@ -85,6 +47,8 @@ static ble_conn_state_user_flag_id_t  m_flag_local_db_apply_pending;  /**< Flag 
 static ble_conn_state_user_flag_id_t  m_flag_service_changed_pending; /**< Flag ID for flag collection to keep track of which connections need to be sent a service changed indication. */
 static ble_conn_state_user_flag_id_t  m_flag_service_changed_sent;    /**< Flag ID for flag collection to keep track of which connections have been sent a service changed indication and are waiting for a handle value confirmation. */
 static ble_conn_state_user_flag_id_t  m_flag_car_update_pending;      /**< Flag ID for flag collection to keep track of which connections need to have their Central Address Resolution value stored. */
+static ble_conn_state_user_flag_id_t  m_flag_car_handle_queried;      /**< Flag ID for flag collection to keep track of which connections are pending Central Address Resolution handle reply. */
+static ble_conn_state_user_flag_id_t  m_flag_car_value_queried;       /**< Flag ID for flag collection to keep track of which connections are pending Central Address Resolution value reply. */
 
 #ifdef PM_SERVICE_CHANGED_ENABLED
     STATIC_ASSERT(PM_SERVICE_CHANGED_ENABLED || !NRF_SDH_BLE_SERVICE_CHANGED,
@@ -423,7 +387,10 @@ static void car_update_pending_handle(uint16_t conn_handle, void * p_context)
     ble_gattc_handle_range_t const car_handle_range = {1, 0xFFFF};
 
     ret_code_t err_code = sd_ble_gattc_char_value_by_uuid_read(conn_handle, &car_uuid, &car_handle_range);
-    UNUSED_RETURN_VALUE(err_code);
+    if (err_code == NRF_SUCCESS)
+    {
+        ble_conn_state_user_flag_set(conn_handle, m_flag_car_handle_queried, true);
+    }
 }
 
 
@@ -558,12 +525,16 @@ ret_code_t gcm_init()
     m_flag_service_changed_pending = ble_conn_state_user_flag_acquire();
     m_flag_service_changed_sent    = ble_conn_state_user_flag_acquire();
     m_flag_car_update_pending      = ble_conn_state_user_flag_acquire();
+    m_flag_car_handle_queried      = ble_conn_state_user_flag_acquire();
+    m_flag_car_value_queried       = ble_conn_state_user_flag_acquire();
 
     if  ((m_flag_local_db_update_pending  == BLE_CONN_STATE_USER_FLAG_INVALID)
       || (m_flag_local_db_apply_pending   == BLE_CONN_STATE_USER_FLAG_INVALID)
       || (m_flag_service_changed_pending  == BLE_CONN_STATE_USER_FLAG_INVALID)
       || (m_flag_service_changed_sent     == BLE_CONN_STATE_USER_FLAG_INVALID)
       || (m_flag_car_update_pending       == BLE_CONN_STATE_USER_FLAG_INVALID)
+      || (m_flag_car_handle_queried       == BLE_CONN_STATE_USER_FLAG_INVALID)
+      || (m_flag_car_value_queried        == BLE_CONN_STATE_USER_FLAG_INVALID)
       )
     {
         NRF_LOG_ERROR("Could not acquire conn_state user flags. Increase "\
@@ -579,7 +550,6 @@ ret_code_t gcm_init()
 }
 
 
-
 void store_car_value(uint16_t conn_handle, bool car_value)
 {
     // Use a uint32_t to enforce 4-byte alignment.
@@ -591,6 +561,8 @@ void store_car_value(uint16_t conn_handle, bool car_value)
         .data_id      = PM_PEER_DATA_ID_CENTRAL_ADDR_RES,
         .length_words = 1,
     };
+
+    ble_conn_state_user_flag_set(conn_handle, m_flag_car_update_pending, false);
     peer_data.p_central_addr_res = car_value ? &car_value_true : &car_value_false;
     ret_code_t err_code = pds_peer_data_store(im_peer_id_get_by_conn_handle(conn_handle), &peer_data, NULL);
     if (err_code != NRF_SUCCESS)
@@ -598,7 +570,6 @@ void store_car_value(uint16_t conn_handle, bool car_value)
         NRF_LOG_WARNING("CAR char value couldn't be stored (error: %s). Reattempt will happen on the next connection.", nrf_strerror_get(err_code));
     }
 }
-
 
 
 /**@brief Callback function for BLE events from the SoftDevice.
@@ -644,10 +615,16 @@ void gcm_ble_evt_handler(ble_evt_t const * p_ble_evt)
 
         case BLE_GATTC_EVT_CHAR_VAL_BY_UUID_READ_RSP:
         {
-            bool car_value = false;
+            bool handle_found = false;
             conn_handle = p_ble_evt->evt.gattc_evt.conn_handle;
+            const ble_gattc_evt_char_val_by_uuid_read_rsp_t * p_val = &p_ble_evt->evt.gattc_evt.params.char_val_by_uuid_read_rsp;
 
-            ble_conn_state_user_flag_set(conn_handle, m_flag_car_update_pending, false);
+            if (!ble_conn_state_user_flag_get(conn_handle, m_flag_car_handle_queried))
+            {
+                break;
+            }
+
+            ble_conn_state_user_flag_set(conn_handle, m_flag_car_handle_queried, false);
 
             if (p_ble_evt->evt.gattc_evt.gatt_status == BLE_GATT_STATUS_ATTERR_ATTRIBUTE_NOT_FOUND)
             {
@@ -661,26 +638,70 @@ void gcm_ble_evt_handler(ble_evt_t const * p_ble_evt)
             }
             else
             {
-                if (p_ble_evt->evt.gattc_evt.params.char_val_by_uuid_read_rsp.count != 1)
+                if (p_val->count != 1)
                 {
                     NRF_LOG_WARNING("Multiple (%d) CAR characteristics found, using the first.",
-                                    p_ble_evt->evt.gattc_evt.params.char_val_by_uuid_read_rsp.count);
+                                    p_val->count);
                 }
 
-                if (p_ble_evt->evt.gattc_evt.params.char_val_by_uuid_read_rsp.value_len != 1)
+                if (p_val->value_len != 1)
                 {
                     NRF_LOG_WARNING("Unexpected CAR characteristic value length (%d), store 0.",
-                                    p_ble_evt->evt.gattc_evt.params.char_val_by_uuid_read_rsp.value_len);
+                                    p_val->value_len);
                     // Store 0.
                 }
                 else
                 {
-                    car_value = *p_ble_evt->evt.gattc_evt.params.char_val_by_uuid_read_rsp.handle_value;
+                    ret_code_t err_code = sd_ble_gattc_read(conn_handle, *(uint16_t*)p_val->handle_value, 0);
+                    if (err_code == NRF_SUCCESS)
+                    {
+                        handle_found = true;
+                        ble_conn_state_user_flag_set(conn_handle, m_flag_car_value_queried, true);
+                    }
+                }
+            }
+
+            if (!handle_found)
+            {
+                store_car_value(conn_handle, false);
+            }
+            break;
+        }
+
+        case BLE_GATTC_EVT_READ_RSP:
+        {
+            bool car_value = false;
+            conn_handle = p_ble_evt->evt.gattc_evt.conn_handle;
+            const ble_gattc_evt_read_rsp_t * p_val = &p_ble_evt->evt.gattc_evt.params.read_rsp;
+
+            if (!ble_conn_state_user_flag_get(conn_handle, m_flag_car_value_queried))
+            {
+                break;
+            }
+
+            ble_conn_state_user_flag_set(conn_handle, m_flag_car_value_queried, false);
+
+            if (p_ble_evt->evt.gattc_evt.gatt_status != BLE_GATT_STATUS_SUCCESS)
+            {
+                NRF_LOG_WARNING("Unexpected GATT status while getting CAR char value: 0x%x",
+                                p_ble_evt->evt.gattc_evt.gatt_status);
+                // Store 0.
+            }
+            else
+            {
+                if (p_val->len != 1)
+                {
+                    NRF_LOG_WARNING("Unexpected CAR characteristic value length (%d), store 0.",
+                                    p_val->len);
+                    // Store 0.
+                }
+                else
+                {
+                    car_value = *p_val->data;
                 }
             }
 
             store_car_value(conn_handle, car_value);
-            break;
         }
     }
 

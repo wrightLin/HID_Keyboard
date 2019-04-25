@@ -440,6 +440,54 @@ void pm_handler_flash_clean(pm_evt_t const * p_pm_evt)
 }
 
 
+
+//wright 0424: save bonding peer_id to register for mode selection  
+void save_bond_peer_id_to_register(pm_evt_id_t peer_id)
+{
+
+	//cause regiter init val is 0, to avoid confuse we add a start val to peer_id;
+	uint8_t peer_start_val = 1;
+	uint8_t peer_id_val = (peer_id + peer_start_val) &0x0f;
+	
+	
+		NRF_LOG_INFO("=== Enter save_bond_peer_id_to_register ===");
+		NRF_LOG_INFO("NRF_POWER->GPREGRET2 : %4x , peer_id_val : %x",NRF_POWER->GPREGRET2,peer_id_val);
+	
+	//check if peer_id is already exist
+	if((NRF_POWER->GPREGRET2 & 0xf0) ==(peer_id_val<<4) || 
+		(NRF_POWER->GPREGRET2 & 0x0f) ==peer_id_val )
+		{
+			NRF_LOG_INFO(" peer_id is already exist NRF_POWER->GPREGRET2 :%4x " , NRF_POWER->GPREGRET2);
+			NRF_LOG_INFO(" peer_id_val:%d " , peer_id_val);
+			return;
+		}
+	
+	//check whether first word of register is init val or not 
+	if((NRF_POWER->GPREGRET2 & 0xf0) ==0x00)
+	{
+		NRF_LOG_INFO(" first word of register is init val :NRF_POWER->GPREGRET2 :%4x  " , NRF_POWER->GPREGRET2);
+		NRF_POWER->GPREGRET2 = (peer_id_val<<4);
+	}
+	//check whether second word of register is init val or not 
+	else if ((NRF_POWER->GPREGRET2 & 0x0f) ==0x00)
+	{
+		NRF_LOG_INFO(" second word of register is init val :NRF_POWER->GPREGRET2 :%4x  " , NRF_POWER->GPREGRET2);
+		NRF_POWER->GPREGRET2 = (NRF_POWER->GPREGRET2 |peer_id_val);
+	}
+	//two words in the register are not init val ; 
+	else
+	{
+		NRF_LOG_INFO(" two words in the register are not init val :NRF_POWER->GPREGRET2 :%4x  " , NRF_POWER->GPREGRET2);
+		//shift second word to first; 
+		NRF_POWER->GPREGRET2 = ((NRF_POWER->GPREGRET2&0x0f)<<4);
+		//put peer_id to second word;
+		NRF_POWER->GPREGRET2 = (NRF_POWER->GPREGRET2|peer_id_val);
+	}
+	
+	NRF_LOG_INFO("== after save_bond_peer_id_to_register() => NRF_POWER->GPREGRET2: %4x ==" , NRF_POWER->GPREGRET2);
+}
+
+
 void pm_handler_pm_evt_log(pm_evt_t const * p_pm_evt)
 {
     NRF_LOG_DEBUG("Event %s", m_event_str[p_pm_evt->evt_id]);
@@ -461,10 +509,14 @@ void pm_handler_pm_evt_log(pm_evt_t const * p_pm_evt)
             break;
 
         case PM_EVT_CONN_SEC_SUCCEEDED:
-            NRF_LOG_INFO("Connection secured: role: %s, conn_handle: %d, procedure: %s",
+            NRF_LOG_INFO("Connection GGGGsecured: role: %s, conn_handle: %d, procedure: %s",
                          m_roles_str[ble_conn_state_role(p_pm_evt->conn_handle)],
                          p_pm_evt->conn_handle,
                          m_sec_procedure_str[p_pm_evt->params.conn_sec_start.procedure]);
+				
+						//wright : 0424 save peer_id to register
+						save_bond_peer_id_to_register(p_pm_evt->peer_id);
+				
             break;
 
         case PM_EVT_CONN_SEC_FAILED:

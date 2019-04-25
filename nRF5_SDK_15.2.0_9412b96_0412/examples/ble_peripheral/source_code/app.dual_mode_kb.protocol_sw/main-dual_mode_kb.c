@@ -118,11 +118,10 @@
 
 #define OUTPUT_REPORT_BIT_MASK_CAPS_LOCK     0x02                                       /**< CAPS LOCK bit in Output Report (based on 'LED Page (0x08)' of the Universal Serial Bus HID Usage Tables). */
 
-//wright : change for test
-//#define M_COMS_BLE_MODE                      0
-//#define M_COMS_GZLL_MODE                     1																							 
-#define M_COMS_BLE_MODE                      1
-#define M_COMS_GZLL_MODE                     0
+//wright : change for test															
+#define M_COMS_GZLL_MODE                     0																							 
+#define M_COMS_BLE_MODE_PAIR_1               1
+#define M_COMS_BLE_MODE_PAIR_2               2
 																							 
 																							 
 #define PROTOCOL_DETECT_PIN                  3
@@ -172,15 +171,23 @@ static struct
 
 
 
-/********************************* wright apptimer start ******************************/
+/********************************* wright change mode start ******************************/
 
-volatile bool fds_is_start = false;
+volatile bool change_mode_is_start = false;
 
 #define DEFAULT_TRANSMIT_MODE 0x0000 //Gazell
 uint8_t is_softdevice_enabled = false;
-/****************************** wright apptimer end ******************************/
+/****************************** wright change mode end ******************************/
 
 
+
+/****************************** wright for swipe **************************/
+static m_keyboard_data_t  s_gzll_keepalive_keyboard_pkt;
+APP_TIMER_DEF(s_gzll_keep_alive_id);
+static void m_keyboard_handler(void * p_event_data, uint16_t event_size);
+static void gzll_keep_alive_handler();
+
+/****************************** wright for swipe end**************************/
 
 /**Buffer queue access macros
  *
@@ -272,7 +279,7 @@ static uint8_t m_caps_off_key_scan_str[] = /**< Key pattern to be sent when the 
 };
 
 
-static bool              m_protocol_mode;
+static uint32_t              m_protocol_mode;
 static bool              m_caps_on = false;                         /**< Variable to indicate if Caps Lock is turned on. */
 //static bool              is_bonded = false;
 
@@ -352,7 +359,7 @@ static void timers_init(void)
     // Initialize timer module.
     ret_code_t err_code = app_timer_init();
     APP_ERROR_CHECK(err_code);
-    if(m_protocol_mode == M_COMS_BLE_MODE)
+    if(m_protocol_mode == M_COMS_BLE_MODE_PAIR_1 || m_protocol_mode == M_COMS_BLE_MODE_PAIR_2)
     {	
         err_code = app_timer_create(&m_battery_timer_id,
                                    APP_TIMER_MODE_REPEATED,
@@ -365,6 +372,9 @@ static void timers_init(void)
 //                                   APP_TIMER_MODE_SINGLE_SHOT,
 //                                   app_gzll_search_timeout_handler);
 			
+			
+			//wright for swipe problem
+			app_timer_create(&s_gzll_keep_alive_id, APP_TIMER_MODE_REPEATED, gzll_keep_alive_handler);
 			
     }		
 
@@ -388,7 +398,7 @@ static void clock_start( void )
  */
 static void application_timers_start(void)
 {
-   if(m_protocol_mode == M_COMS_BLE_MODE)
+   if(m_protocol_mode == M_COMS_BLE_MODE_PAIR_1 || m_protocol_mode == M_COMS_BLE_MODE_PAIR_2)
    {	    
 	     /* YOUR_JOB: Start your timers. below is an example of how to start a timer.*/
        ret_code_t err_code;	
@@ -462,7 +472,7 @@ static uint32_t send_key_scan_press_release(
 //            data[MODIFIER_KEY_POS] |= SHIFT_KEY_CODE;
 //        }
 
-				if (m_protocol_mode == M_COMS_BLE_MODE)
+				if (m_protocol_mode == M_COMS_BLE_MODE_PAIR_1 || m_protocol_mode == M_COMS_BLE_MODE_PAIR_2 )
 				{
 					m_coms_ble_hid_report_send(0, data);
         }
@@ -517,7 +527,7 @@ static uint32_t send_key_scan_press_release_fix(
             data[MODIFIER_KEY_POS] |= p_modifer;
 				
 				
-				if (m_protocol_mode == M_COMS_BLE_MODE)
+				if (m_protocol_mode == M_COMS_BLE_MODE_PAIR_1 || m_protocol_mode == M_COMS_BLE_MODE_PAIR_2)
 				{
 					m_coms_ble_hid_report_send(0, data);
         }
@@ -1005,7 +1015,7 @@ static void modules_init(void)
    power_management_init();
 
 	 
-	if(m_protocol_mode == M_COMS_BLE_MODE)
+	if(m_protocol_mode == M_COMS_BLE_MODE_PAIR_1 || m_protocol_mode == M_COMS_BLE_MODE_PAIR_2)
 	{	
      m_coms_ble_init(m_coms_ble_evt_handler);
   }
@@ -1022,7 +1032,7 @@ static void modules_init(void)
 static void modules_enable(bool erase_bonds)
 {
 
-  if(m_protocol_mode == M_COMS_BLE_MODE)
+  if(m_protocol_mode == M_COMS_BLE_MODE_PAIR_1 || m_protocol_mode == M_COMS_BLE_MODE_PAIR_2)
 	{	
 	
 		m_coms_ble_enable(erase_bonds);
@@ -1068,59 +1078,6 @@ static void protocol_det_pin_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polari
 
 
 
-/**@brief Initialization of unused I/Os
- */
-static void misc_io_init(void)
-{
-    ret_code_t err_code; 
-	  int i;
-    uint32_t unused_pins[] = {0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 26, 27, 28, 29, 30, 31};  
-    uint8_t  level;   
-
-    for (i = 0; i < (sizeof(unused_pins) / sizeof(unused_pins[0])); ++i)
-    {
-        uint32_t pin = unused_pins[i];
-        
-        NRF_GPIO->PIN_CNF[pin] =
-            (GPIO_PIN_CNF_DIR_Input        << GPIO_PIN_CNF_DIR_Pos)    |
-            (GPIO_PIN_CNF_INPUT_Disconnect << GPIO_PIN_CNF_INPUT_Pos)  |
-            (GPIO_PIN_CNF_PULL_Disabled    << GPIO_PIN_CNF_PULL_Pos)   |
-            (GPIO_PIN_CNF_DRIVE_S0S1       << GPIO_PIN_CNF_DRIVE_Pos)  |
-            (GPIO_PIN_CNF_SENSE_Disabled   << GPIO_PIN_CNF_SENSE_Pos);           
-    }     
-		
-				//Set P0.03 as a protocol detect input pin, default GZLL, GND to BLE
-		   NRF_GPIO->PIN_CNF[PROTOCOL_DETECT_PIN] =
-		        (GPIO_PIN_CNF_DIR_Input        << GPIO_PIN_CNF_DIR_Pos)    |
-            (GPIO_PIN_CNF_INPUT_Connect    << GPIO_PIN_CNF_INPUT_Pos)  |
-            (GPIO_PIN_CNF_PULL_Pullup      << GPIO_PIN_CNF_PULL_Pos)   |
-            (GPIO_PIN_CNF_DRIVE_S0S1       << GPIO_PIN_CNF_DRIVE_Pos)  |
-            (GPIO_PIN_CNF_SENSE_Disabled   << GPIO_PIN_CNF_SENSE_Pos);
-		
-		level = nrf_gpio_pin_read(PROTOCOL_DETECT_PIN);
-		
-		if (!nrf_drv_gpiote_is_init())
-    {
-		   err_code = nrf_drv_gpiote_init();
-       APP_ERROR_CHECK(err_code);
-		}
-		//Set P0.03 as a protocol detect input pin, VDD to GZLL, GND to BLE
-		memset(&protocol_detect_pin_cfg, 0, sizeof(protocol_detect_pin_cfg));
-		protocol_detect_pin_cfg.hi_accuracy = true;
-	  
-		protocol_detect_pin_cfg.sense = (level==M_COMS_BLE_MODE)? NRF_GPIOTE_POLARITY_LOTOHI : NRF_GPIOTE_POLARITY_HITOLO  ;
-		protocol_detect_pin_cfg.pull  = (level==M_COMS_BLE_MODE)? NRF_GPIO_PIN_PULLDOWN : NRF_GPIO_PIN_PULLUP ;
-		
-		NRF_LOG_INFO("protocol detect pin toggled, level = %d", nrf_gpio_pin_read(PROTOCOL_DETECT_PIN) );
-		
-		err_code = nrf_drv_gpiote_in_init(PROTOCOL_DETECT_PIN, &protocol_detect_pin_cfg, protocol_det_pin_handler);
-		APP_ERROR_CHECK(err_code);
-		
-		nrf_drv_gpiote_in_event_enable(PROTOCOL_DETECT_PIN, true);
-	
-}			
-
-
 /************************************* wright : add keyboard function **************************************/
 
 
@@ -1128,21 +1085,84 @@ static void misc_io_init(void)
  */
 //wright : for mode selection
 
-static uint8_t KEY_CODE_BLE_MODE = 0xAA;
-static uint8_t KEY_CODE_GARZLL_MODE = 0xAB;
+static uint8_t KEY_CODE_GARZLL_MODE = 0xAA;
+static uint8_t KEY_CODE_BLE_MODE_PAIR_1 = 0xAB;
+static uint8_t KEY_CODE_BLE_MODE_PAIR_2 = 0xAC;
 bool IS_KEY_CODE_MODE_PRESSED = false;
+
+static void mode_change_key_check(m_keyboard_data_t * keyboard_pkt)
+{
+
+		//check if keypackage contain change mode key code
+		if( keyboard_pkt->keys[0]== KEY_CODE_GARZLL_MODE)
+		{
+			NRF_LOG_INFO("---PRESS KEY_CODE_GARZLL_MODE !---");
+			IS_KEY_CODE_MODE_PRESSED = true;
+			current_transmit_mode_data[0] = M_COMS_GZLL_MODE;
+		}
+			
+		if(keyboard_pkt->keys[0] == KEY_CODE_BLE_MODE_PAIR_1)	
+		{
+			NRF_LOG_INFO("---PRESS KEY_CODE_BLE_MODE_PAIR_1 !---");
+			IS_KEY_CODE_MODE_PRESSED = true;
+			current_transmit_mode_data[0] = M_COMS_BLE_MODE_PAIR_1;
+		}
+		if(keyboard_pkt->keys[0] == KEY_CODE_BLE_MODE_PAIR_2)	
+		{
+			NRF_LOG_INFO("---PRESS KEY_CODE_BLE_MODE_PAIR_2 !---");
+			IS_KEY_CODE_MODE_PRESSED = true;
+			current_transmit_mode_data[0] = M_COMS_BLE_MODE_PAIR_2;
+		}		
+		
+		//if change key code pressed ; write it to NRF_POWER->GPREGRET 
+		if(IS_KEY_CODE_MODE_PRESSED)
+		{
+			m_keyboard_polling_disable();
+			
+			change_mode_is_start = true;
+			
+			NRF_POWER->GPREGRET = current_transmit_mode_data[0];
+			
+			NRF_LOG_INFO("--- Write current_transmit_mode_data: %d to NRF_POWER->GPREGRET !---",
+			current_transmit_mode_data[0]);
+		
+			//reset after save the mode info
+			sd_softdevice_is_enabled(&is_softdevice_enabled);
+			
+			if (is_softdevice_enabled==1)
+			{	
+				sd_nvic_SystemReset();
+			}
+			else
+			{
+				NVIC_SystemReset();
+			}		
+			
+		}
+			
+}
+
+//wright 0424: for key swipe problem  
+static void gzll_keep_alive_handler()
+{
+	// Put the previous keyboard packet in buffer.
+	//(differ from dt2 :  buffer_keys(&s_gzll_keepalive_keyboard_pkt);  )
+
+		keys_send_fix(s_gzll_keepalive_keyboard_pkt.num_keys,
+									s_gzll_keepalive_keyboard_pkt.keys,
+									s_gzll_keepalive_keyboard_pkt.modifier_keys);	
+}
 
 
 static void m_keyboard_handler(void * p_event_data, uint16_t event_size)
 {
     uint32_t            err_code;
     m_keyboard_data_t * keyboard_pkt;
-    
+
     ASSERT(event_size == sizeof(m_keyboard_data_t));
     
     keyboard_pkt = (m_keyboard_data_t *) p_event_data;
 	
-
 		NRF_LOG_INFO("---Enter m_keyboard_handler!---");
 
 	
@@ -1152,50 +1172,27 @@ static void m_keyboard_handler(void * p_event_data, uint16_t event_size)
 		}
 		else
 		{
-				//if user pressed mode change btn combo (fn+1;fn+2)
-				//0.stop polling	
-				//1.delete mode data 
-				//2.write mode data to flash 
-				//3.reset 
-				if(keyboard_pkt->keys[0] == KEY_CODE_BLE_MODE)
+			//wright : change mode
+				if(!change_mode_is_start)
 				{
-					NRF_LOG_INFO("---PRESS KEY_CODE_BLE_MODE !---");
-					IS_KEY_CODE_MODE_PRESSED = true;
-					current_transmit_mode_data[0] = M_COMS_BLE_MODE;
+					mode_change_key_check(keyboard_pkt);
 				}
-					
 				
-				if(keyboard_pkt->keys[0] == KEY_CODE_GARZLL_MODE)	
-				{
-					NRF_LOG_INFO("---PRESS KEY_CODE_GARZLL_MODE !---");
-					IS_KEY_CODE_MODE_PRESSED = true;
-					current_transmit_mode_data[0] = M_COMS_GZLL_MODE;
-				}
-						
-			
-				//wright : 
-				// start to update mode data under these conditions 
-				// 1.mode change key has pressed 
-				// 2.Keyboard was released
-				if(
-						!fds_is_start&&
-						m_keyboard_packet_is_empty(keyboard_pkt)&&
-						IS_KEY_CODE_MODE_PRESSED
-					)
-					{
-						
-
-						fds_is_start = true;
-						m_keyboard_polling_disable();
-						NRF_LOG_INFO("---KEY_CODE_MODE_PRESSED & Released!---");
-						mode_record_update(current_transmit_mode_data[0]);
-						while(fds_busy_flag==true){idle_state_handle();}
-
-					}
-
-
 				keys_send_fix(keyboard_pkt->num_keys,keyboard_pkt->keys,keyboard_pkt->modifier_keys);
 				
+				//wright 0424: for key swipe problem  
+				if(current_transmit_mode_data[0] == M_COMS_GZLL_MODE)
+				{
+					memcpy(&s_gzll_keepalive_keyboard_pkt, keyboard_pkt, sizeof(m_keyboard_data_t));
+					if (m_keyboard_packet_is_empty(keyboard_pkt))
+					{
+							app_timer_stop(s_gzll_keep_alive_id);
+					}
+					else
+					{
+							app_timer_start(s_gzll_keep_alive_id, APP_TIMER_TICKS(500),0);
+					}
+				}
 		}
 
     m_pwr_mgmt_feed();
@@ -1455,33 +1452,33 @@ static void wait_for_fds_ready(void)
 
 
 //wright: mode selection 
-
-bool mode_selection()
+static uint32_t mode_selection()
 {
-		
-
-
-	
-		bool mode_result;
+		uint32_t mode_result = 0;
 		ret_code_t ret;
 
-		/* Register first to receive an event when initialization is complete. */
-		(void) fds_register(fds_evt_handler);
-	
-		ret = fds_init();
-		wait_for_fds_ready();
-
-
 		NRF_LOG_INFO("--- record read ---");
-		ret = mode_record_read();
-		while(fds_busy_flag==true){idle_state_handle();}
-
-		
-		//decide transmit mode
-		mode_result =(current_transmit_mode_data[0] == DEFAULT_TRANSMIT_MODE) ;
-		
-		
-		
+		//read last transmitted mode from gpregret register
+		mode_result = NRF_POWER->GPREGRET;
+	
+		switch(mode_result)
+		{
+			case 0:
+				NRF_LOG_INFO("--- Default Mode : Gazll ---");
+				m_protocol_mode= M_COMS_GZLL_MODE;
+				break;
+			case 1:
+				NRF_LOG_INFO("--- BLE Mode : Pairing Device 1 ---");
+				m_protocol_mode= M_COMS_BLE_MODE_PAIR_1;
+				break;
+			case 2:
+				NRF_LOG_INFO("--- BLE Mode : Pairing Device 2 ---");
+				m_protocol_mode= M_COMS_BLE_MODE_PAIR_2;
+				break;
+			default :
+				NRF_LOG_INFO("--- Default Mode : Gazll ---");
+				break;		
+		}
 		
 		return mode_result;
 }
@@ -1497,28 +1494,19 @@ bool mode_selection()
  */
 int main(void)
 {
-    bool erase_bonds;  
+	//wright : 0422 keep bonding information 
+    bool erase_bonds = false;  //bool erase_bonds;  
 
     // Initialize.
     log_init();
 
-   // misc_io_init();    //For protocol mode setting & unused pins	
-	
-	
 		//wright : Mode selection
 		mode_selection();
-//		m_protocol_mode = 
-//		((mode_selection())?M_COMS_GZLL_MODE:M_COMS_BLE_MODE) ;
-
-    m_protocol_mode = M_COMS_GZLL_MODE;//((nrf_gpio_pin_read(PROTOCOL_DETECT_PIN) == 0)?M_COMS_BLE_MODE:M_COMS_GZLL_MODE) ;
 
     timers_init();	
 
     scheduler_init();
 		
-		//wright : fix for not to infect GPIO output
-    //buttons_leds_init(&erase_bonds);
-
     modules_init();
 
     NRF_LOG_INFO("Dual mode keyboard example started.");

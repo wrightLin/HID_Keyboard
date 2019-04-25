@@ -223,6 +223,12 @@ static ret_code_t set_adv_mode_directed_high_duty(ble_advertising_t * const p_ad
     p_adv_params->properties.type = BLE_GAP_ADV_TYPE_CONNECTABLE_NONSCANNABLE_DIRECTED_HIGH_DUTY_CYCLE;
     p_adv_params->duration        = BLE_GAP_ADV_TIMEOUT_HIGH_DUTY_MAX;
 
+	
+		//wright: 0423 
+		NRF_LOG_INFO("== in set_adv_mode_directed_high_duty ===  p_adv_params->p_peer_addr : ");
+		NRF_LOG_HEXDUMP_INFO(p_adv_params->p_peer_addr->addr,BLE_GAP_ADDR_LEN);
+	
+	
     return NRF_SUCCESS;
 }
 

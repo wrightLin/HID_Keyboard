@@ -414,11 +414,15 @@ bool drv_keyboard_remap_special_keys(uint8_t *keys, uint8_t modifier_keys, uint8
 					
 					//wright : add for change mode
 					case 0x1E: //'1'
-            keys[i] = 0xAA; //'BLE mode'
+            keys[i] = 0xAA; //'Gazell mode'
             break;
 					
 					case 0x1F: //'2'
-            keys[i] = 0xAB; //'Gazell mode'
+            keys[i] = 0xAB; //'BLE mode (PAIR 1)'
+            break;
+					
+					case 0x20: //'3'
+            keys[i] = 0xAC; //'BLE mode (PAIR 2)'
             break;
 					//wright : add for change mode end
 					
