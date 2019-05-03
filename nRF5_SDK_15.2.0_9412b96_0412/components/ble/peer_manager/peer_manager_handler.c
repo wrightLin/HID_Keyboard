@@ -509,7 +509,7 @@ void pm_handler_pm_evt_log(pm_evt_t const * p_pm_evt)
             break;
 
         case PM_EVT_CONN_SEC_SUCCEEDED:
-            NRF_LOG_INFO("Connection GGGGsecured: role: %s, conn_handle: %d, procedure: %s",
+            NRF_LOG_INFO("Connection secured: role: %s, conn_handle: %d, procedure: %s",
                          m_roles_str[ble_conn_state_role(p_pm_evt->conn_handle)],
                          p_pm_evt->conn_handle,
                          m_sec_procedure_str[p_pm_evt->params.conn_sec_start.procedure]);

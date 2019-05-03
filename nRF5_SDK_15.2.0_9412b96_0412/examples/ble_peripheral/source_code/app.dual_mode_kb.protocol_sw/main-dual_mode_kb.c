@@ -499,6 +499,7 @@ static uint32_t send_key_scan_press_release_fix(
 																						uint8_t     p_modifer
 )
 {
+
     ret_code_t err_code = NRF_SUCCESS;
     uint16_t offset;
     uint16_t data_len;
@@ -513,8 +514,7 @@ static uint32_t send_key_scan_press_release_fix(
     offset   = pattern_offset;
     data_len = pattern_len;
 
-    do
-    {
+
         // Reset the data buffer.
         memset(data, 0, sizeof(data));
 
@@ -533,11 +533,28 @@ static uint32_t send_key_scan_press_release_fix(
         }
 				else
 				{
+					
+					//wright 0503 check if there is any empty packet
+					
+					bool is_data_empty = true;
+					for(int i = 0 ; i < INPUT_REPORT_KEYS_MAX_LEN;i++)
+					{
+						if(data[i] != 0x00)
+						{
+							is_data_empty = false;
+						}
+					}
+					if(is_data_empty)
+					{
+						NRF_LOG_INFO("there is an empty data going to be sent......data: \r\n");
+						NRF_LOG_HEXDUMP_INFO(data,INPUT_REPORT_KEYS_MAX_LEN);
+					}
+					
+					
           m_coms_gzll_send(1 ,data, sizeof(data));
+
         }									
-        offset++;
-    }
-    while (offset <= data_len);
+
 
     *p_actual_len = offset;
 
